@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { assertCron, siteUrl } from '@/lib/cron-auth';
 import { hasWebhook, sendDailyPicks } from '@/lib/discord';
-import { getForecast } from '@/lib/fishing-cache';
+import { getForecastFresh } from '@/lib/fishing-cache';
 import { todayKst } from '@/lib/fishing';
 
 /**
@@ -23,7 +23,8 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const wantTomorrow = new URL(request.url).searchParams.get('day') === 'tomorrow';
-  const forecast = await getForecast();
+  // 발송 직전 강제 수집. 캐시된 예보로 알림을 보내면 하루 지난 지수가 나갈 수 있다.
+  const forecast = await getForecastFresh();
 
   // 예보 목록에서 직접 고른다. 날짜를 계산해 만들면 예보에 없는 날을 짚을 수 있다.
   const today = todayKst();
@@ -43,5 +44,6 @@ export async function GET(request: Request): Promise<Response> {
     siteUrl(),
   );
 
-  return NextResponse.json({ ok: true, date: target, ...result });
+  // fetchedAt 을 응답에 실어 둔다. 강제 수집이 실제로 돌았는지 밖에서 확인할 방법이 이것뿐이다.
+  return NextResponse.json({ ok: true, date: target, fetchedAt: forecast.fetchedAt, ...result });
 }

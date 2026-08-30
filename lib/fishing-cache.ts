@@ -18,6 +18,11 @@ const MAX_PAGES = 25;
 /**
  * 예보는 하루 단위로 갱신된다(발표 주기는 공식 문서에 없다 — 관측되는 값은 일 단위).
  * 3시간이면 새 발표를 놓치지 않으면서 호출도 하루 8×18=144콜로 일 10,000 한도에 여유가 크다.
+ *
+ * 알림 크론이 발송 직전에 강제 수집하게 바꾼 뒤에도 3시간을 유지한다.
+ * 업스트림이 **하루 단위**로만 갱신되므로 TTL 을 줄여도 새 데이터가 나오지 않는다.
+ * 즉 줄이면 호출만 늘고 얻는 게 없다. 반대로 늘리면 새 발표를 최대 그만큼 늦게 집는다.
+ * 3시간은 일 갱신 주기의 1/8 이라 이미 충분히 촘촘하다.
  */
 const TTL_MS = 3 * 60 * 60 * 1000;
 const UPSTREAM_REVALIDATE = 3 * 60 * 60;
@@ -37,12 +42,12 @@ let cached: { at: number; forecast: Forecast } | null = null;
 /** 진행 중인 수집. 동시에 여러 요청이 들어와도 업스트림은 한 번만 친다. */
 let inflight: Promise<Forecast> | null = null;
 
-async function collect(): Promise<Forecast> {
+async function collect(force = false): Promise<Forecast> {
   const rows: RawFishing[] = [];
   let totalCount = 0;
 
   for (let page = 1; page <= MAX_PAGES; page += 1) {
-    const result = await fetchFishingPage(page, UPSTREAM_REVALIDATE);
+    const result = await fetchFishingPage(page, UPSTREAM_REVALIDATE, force);
     totalCount = result.totalCount;
     rows.push(...result.items);
     if (result.items.length < MAX_ROWS || rows.length >= totalCount) break;
@@ -72,4 +77,22 @@ export async function getForecast(): Promise<Forecast> {
     });
 
   return inflight;
+}
+
+/**
+ * 캐시를 전부 무시하고 지금 업스트림에서 다시 받는다. **알림 크론 전용.**
+ *
+ * 캐시가 두 겹이라 둘 다 뚫어야 한다 —
+ *  (1) 이 파일의 `cached`/`TTL_MS` 메모리 캐시: `getForecast` 를 아예 거치지 않는다.
+ *  (2) Next 의 Data Cache: `collect(true)` → `fetchFishingPage(..., force)` → `cache: 'no-store'`.
+ * 한 겹만 뚫으면 여전히 옛 데이터가 발송된다.
+ *
+ * `inflight` 는 건드리지 않는다. 강제 수집이 그 자리를 차지하면 동시에 들어온
+ * 사용자 요청의 중복 제거가 깨진다. 대신 결과로 `cached` 만 갱신해서,
+ * 알림 직후 접속한 사용자도 방금 받은 데이터를 보게 한다(워밍 효과).
+ */
+export async function getForecastFresh(): Promise<Forecast> {
+  const forecast = await collect(true);
+  cached = { at: Date.now(), forecast };
+  return forecast;
 }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { assertCron, siteUrl } from '@/lib/cron-auth';
 import { hasWebhook, sendWeekendOutlook } from '@/lib/discord';
-import { getForecast } from '@/lib/fishing-cache';
+import { getForecastFresh } from '@/lib/fishing-cache';
 import { todayKst } from '@/lib/fishing';
 
 /**
@@ -42,7 +42,8 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.json({ ok: false, reason: 'DISCORD_WEBHOOK_URL 없음' }, { status: 503 });
   }
 
-  const forecast = await getForecast();
+  // 발송 직전 강제 수집. 캐시된 예보로 알림을 보내면 하루 지난 지수가 나갈 수 있다.
+  const forecast = await getForecastFresh();
   const today = todayKst();
 
   const upcoming = forecast.days.map((day) => day.date).filter((date) => date >= today);
@@ -62,5 +63,11 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const result = await sendWeekendOutlook(forecast.spots, days, siteUrl());
-  return NextResponse.json({ ok: true, days: days.map((d) => d.date), ...result });
+  // fetchedAt 을 응답에 실어 둔다. 강제 수집이 실제로 돌았는지 밖에서 확인할 방법이 이것뿐이다.
+  return NextResponse.json({
+    ok: true,
+    days: days.map((d) => d.date),
+    fetchedAt: forecast.fetchedAt,
+    ...result,
+  });
 }

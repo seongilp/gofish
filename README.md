@@ -63,13 +63,18 @@ https://gofish-kr.vercel.app
 
 ## Discord 알림
 
-크론 3개가 돈다. 스케줄은 `vercel.json` 에 있고 **Vercel cron 은 UTC 라 KST 에서 9시간을 뺀 값**이다.
+크론 2개가 돈다. 스케줄은 `vercel.json` 에 있고 **Vercel cron 은 UTC 라 KST 에서 9시간을 뺀 값**이다.
 
 | KST | UTC (vercel.json) | 라우트 | 내용 |
 |---|---|---|---|
-| 매일 03:00 | `0 18 * * *` | `/api/cron/refresh` | 데이터 데우기. Discord 발송 없음 |
 | 매일 07:00 | `0 22 * * *` | `/api/cron/daily` | 오늘 좋은 곳 상위 5 + 전국 5단계 분포 |
 | 금 18:00 | `0 9 * * 5` | `/api/cron/weekend` | 토·일 전망 (하루당 embed 1개) |
+
+두 라우트 모두 **발송 직전에 업스트림에서 강제로 다시 받는다**(`getForecastFresh`).
+메모리 캐시와 Next Data Cache 를 둘 다 건너뛴다 — 한 겹만 뚫으면 옛 예보가 나간다.
+예전에 있던 `/api/cron/refresh` 는 지웠다. `next: { revalidate }` 는 "지금 받아라"가
+아니라서 실제로 아무것도 갱신하지 않았고, 데워둔 캐시도 다음 알림 크론까지 3시간 1분이
+남아 3시간 TTL 이 먼저 죽었다.
 
 설계 메모:
 

@@ -99,13 +99,22 @@ function buildUrl(page: number, rows: number): string {
   ].join('&');
 }
 
-/** 한 페이지 조회. `revalidate` 는 Next 의 업스트림 캐시에 그대로 넘긴다. */
+/**
+ * 한 페이지 조회. `revalidate` 는 Next 의 업스트림 캐시에 그대로 넘긴다.
+ *
+ * `force` 는 알림 크론 전용이다.
+ * 왜: `next: { revalidate }` 는 "이만큼 지나면 다시 받아라"이지 "지금 받아라"가 아니다.
+ * revalidate 창이 아직 안 지났으면 Next 는 Data Cache 의 옛 응답을 그대로 돌려준다.
+ * 발송 직전에 반드시 업스트림을 때려야 하는 경로에서는 `cache: 'no-store'` 로
+ * Data Cache 를 통째로 건너뛴다. 사용자 경로는 계속 revalidate 를 써서 쿼터를 지킨다.
+ */
 export async function fetchFishingPage(
   page: number,
   revalidate: number,
+  force = false,
 ): Promise<{ items: RawFishing[]; totalCount: number }> {
   const response = await fetch(buildUrl(page, MAX_ROWS), {
-    next: { revalidate },
+    ...(force ? { cache: 'no-store' as const } : { next: { revalidate } }),
     headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(20_000),
   });
