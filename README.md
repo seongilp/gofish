@@ -3,7 +3,7 @@
 전국 49개 예보지점의 **바다낚시지수**를 7일치로 보는 앱. 오늘 어디가 좋은지는 랭킹으로,
 이번 주 흐름은 지점별 7일 추이로 본다.
 
-https://gofish.vercel.app
+https://gofish-kr.vercel.app
 
 ## 데이터
 
