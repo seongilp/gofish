@@ -36,7 +36,10 @@ https://gofish-kr.vercel.app
    지수·해황 수치는 정상으로 오고 대상어종만 비어 있다.
 6. **최저 수온이 `0.1` 로 오는 레코드가 16건 있다** (원해 4개 지점). 최고값은 25℃ 안팎이라
    결측을 채운 값으로 보인다. 이 앱은 값을 고치지 않고 `?` 표식만 단다.
-7. **serviceKey 를 재인코딩하면 안 된다.** Encoding 키에는 `%2F` 등이 이미 들어 있다.
+7. **CARTO 글리프 서버에 한글이 없다.** `fonts/Open Sans Regular/44032-44287.pbf`(한글 음절)를
+   요청하면 404 가 아니라 **54바이트짜리 빈 응답**이 200 으로 온다. 지점명 라벨이 조용히 사라진다.
+   maplibre 의 `localIdeographFontFamily` 로 한글을 브라우저 폰트에서 그리게 해야 한다.
+8. **serviceKey 를 재인코딩하면 안 된다.** Encoding 키에는 `%2F` 등이 이미 들어 있다.
    `new URL()` + `searchParams.set()` 을 쓰면 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR` 가 난다.
    그래서 쿼리스트링을 문자열로 직접 조립한다 (`lib/fishing-api.ts`).
 
@@ -48,9 +51,15 @@ https://gofish-kr.vercel.app
 - **route handler 는 `export const dynamic = 'force-dynamic'`.** `revalidate` 만 두면
   빌드 타임에 외부 API 를 때리고 사용자의 새로고침도 막힌다. 신선도는 업스트림
   `fetch(..., { next: { revalidate } })` 와 응답의 `Cache-Control` 로 잡는다.
-- **지도를 쓰지 않는다.** 49개 점은 지도를 채우기엔 적고, 이 데이터의 축은 공간이 아니라
-  **시간**(7일 × 오전/오후)이다. 대신 좌표로 나눈 해역(동해·서해·남해·제주) 필터를 둔다.
-  해역은 원본에 없는 파생값이라 화면에 그렇게 밝힌다.
+- **목록 / 지도 전환.** 랭킹이 주 화면이고 지도는 같은 데이터를 공간으로 보는 두 번째 시선이다.
+  지도는 **목록과 같은 필터 결과(`ranked`)를 그대로 받는다** — 지도가 스스로 필터링하면
+  두 화면이 어긋날 수 있어 순위 계산은 한 곳에만 둔다. 어종을 고르면 그 어종 지수로 색이 바뀐다.
+- **지수 색은 `indexTone` 한 곳이 단일 출처다.** 배지·분포 막대·히트맵·지도 원이 전부 같은 hex 를
+  쓴다. 지도만 따로 팔레트를 두면 범례가 조용히 거짓말을 한다.
+- 좌표로 나눈 해역(동해·서해·남해·제주) 필터를 둔다. 해역은 원본에 없는 파생값이라 화면에 그렇게 밝힌다.
+- **베이스맵은 CARTO dark-matter (키 불필요).** maplibre-gl **v5** — v6 은 Turbopack 에서
+  워커 로딩이 조용히 실패한다. maplibre 는 `next/dynamic` + `ssr:false` 로 지연 로딩해
+  목록만 보는 사용자는 받지 않는다.
 
 ## 재현
 
@@ -64,4 +73,4 @@ npm run dev
 
 ## 스택
 
-Next.js 16 (App Router) · TypeScript · Tailwind v4 · shadcn/ui · lucide-react · Vercel
+Next.js 16 (App Router) · TypeScript · Tailwind v4 · shadcn/ui · lucide-react · maplibre-gl v5 · Vercel

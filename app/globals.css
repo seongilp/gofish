@@ -152,3 +152,16 @@
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.62 0.19 260);
 }
+
+/* maplibre 컨트롤을 다크 배경에 맞춘다. 기본 스타일은 밝은 배경 전제라 눈에 튄다. */
+.maplibregl-ctrl-group {
+  background: var(--card) !important;
+  border: 1px solid var(--border);
+}
+.maplibregl-ctrl-group button + button { border-top: 1px solid var(--border); }
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon { filter: invert(1); }
+.maplibregl-ctrl-attrib {
+  background: color-mix(in oklab, var(--card) 80%, transparent) !important;
+  color: var(--muted-foreground);
+}
+.maplibregl-ctrl-attrib a { color: var(--muted-foreground); }

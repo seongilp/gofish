@@ -151,7 +151,8 @@ function Heatmap({
                   <td key={`${slot.date}|${slot.noon}`} className="p-0">
                     <div
                       title={fish ? `${name} · ${fish.index}` : '자료 없음'}
-                      className={cn('h-5 rounded', fish ? tone.dot : 'bg-muted/40')}
+                      className={cn('h-5 rounded', !fish && 'bg-muted/40')}
+                      style={fish ? { backgroundColor: tone.hex } : undefined}
                     />
                   </td>
                 );

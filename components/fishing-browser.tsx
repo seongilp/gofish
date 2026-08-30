@@ -1,6 +1,7 @@
 'use client';
 
-import { AlertTriangle, Fish, Info, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Fish, Info, List, Map as MapIcon, RefreshCw } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState } from 'react';
 
 import { SpotCard } from '@/components/spot-card';
@@ -29,7 +30,18 @@ interface Forecast {
   fetchedAt: string;
 }
 
+/*
+ * maplibre 는 무겁고 window 에 의존한다. 지도 보기를 열기 전에는 받지 않도록
+ * ssr:false 로 지연 로딩한다. 기본이 목록 보기라 대부분의 사용자는 아예 안 받는다.
+ */
+const SpotMap = dynamic(() => import('@/components/spot-map').then((m) => m.SpotMap), {
+  ssr: false,
+  loading: () => <Skeleton className="size-full rounded-xl" />,
+});
+
 const NOON_LABEL: Record<NoonCode, string> = { 오전: '오전', 오후: '오후', 일: '종일' };
+
+type View = 'list' | 'map';
 
 /** 필터 칩. 이 화면의 조작은 전부 칩이라 하나로 통일한다. */
 function Chip({
@@ -72,6 +84,8 @@ export function FishingBrowser() {
   const [region, setRegion] = useState<Region | ''>('');
   const [fish, setFish] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /* 모바일에서 점을 정확히 누르기 어려우니 목록을 기본으로 둔다. */
+  const [view, setView] = useState<View>('list');
   /** 상세 히트맵에서 다른 슬롯을 눌렀을 때만 쓴다. 목록 슬롯과 독립적으로 움직인다. */
   const [detailSlotKey, setDetailSlotKey] = useState<string | null>(null);
 
@@ -170,11 +184,41 @@ export function FishingBrowser() {
           <h1 className="text-base font-bold">
             gofish <span className="text-muted-foreground font-normal">바다낚시지수</span>
           </h1>
+          <div className="border-border bg-card/60 ml-auto flex items-center gap-0.5 rounded-full border p-0.5">
+            <button
+              type="button"
+              onClick={() => setView('list')}
+              aria-pressed={view === 'list'}
+              className={cn(
+                'flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors',
+                view === 'list'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <List className="size-3.5" aria-hidden />
+              목록
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('map')}
+              aria-pressed={view === 'map'}
+              className={cn(
+                'flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors',
+                view === 'map'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <MapIcon className="size-3.5" aria-hidden />
+              지도
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => setReloadKey((key) => key + 1)}
             aria-label="새로고침"
-            className="text-muted-foreground hover:text-foreground hover:bg-secondary ml-auto rounded-lg p-1.5 transition-colors"
+            className="text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg p-1.5 transition-colors"
           >
             <RefreshCw className={cn('size-4', loading && 'animate-spin')} aria-hidden />
           </button>
@@ -261,8 +305,11 @@ export function FishingBrowser() {
             {distribution.map((entry) => (
               <div
                 key={entry.label}
-                className={cn('h-full', indexTone(entry.label).dot)}
-                style={{ width: `${(entry.count / ranked.length) * 100}%` }}
+                className="h-full"
+                style={{
+                  width: `${(entry.count / ranked.length) * 100}%`,
+                  backgroundColor: indexTone(entry.label).hex,
+                }}
                 title={`${entry.label} ${entry.count}곳`}
               />
             ))}
@@ -270,7 +317,10 @@ export function FishingBrowser() {
           <div className="text-muted-foreground mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] tabular-nums">
             {distribution.map((entry) => (
               <span key={entry.label} className="flex items-center gap-1">
-                <span className={cn('size-1.5 rounded-full', indexTone(entry.label).dot)} />
+                <span
+                  className="size-1.5 rounded-full"
+                  style={{ backgroundColor: indexTone(entry.label).hex }}
+                />
                 {entry.label} {entry.count}
               </span>
             ))}
@@ -292,12 +342,32 @@ export function FishingBrowser() {
           </p>
 
           {/*
+            * 지도 보기. 목록과 **같은 `ranked`** 를 넘긴다 — 날짜·시간대·해역·어종 필터가
+            * 그대로 적용되고, 어종을 고르면 그 어종 지수로 색이 바뀐다.
+            * 지도가 스스로 필터링하면 두 화면이 어긋날 수 있어 순위 계산은 한 곳에만 둔다.
+            */}
+          {view === 'map' && (
+            <div className="border-border h-[calc(100dvh-19rem)] min-h-[380px] overflow-hidden rounded-xl border">
+              {loading ? <Skeleton className="size-full" /> : (
+                <SpotMap
+                  rows={ranked}
+                  selectedId={selectedId}
+                  onSelect={(spot) => {
+                    setSelectedId(spot.id);
+                    setDetailSlotKey(null);
+                  }}
+                />
+              )}
+            </div>
+          )}
+
+          {/*
             * 카드 격자는 화면 폭과 무관하게 열 수를 고정한다.
             * 상세 패널이 열릴 때 목록이 1열↔2열로 흔들리면 방금 누른 카드가 눈앞에서
             * 자리를 옮겨 버린다. 그래서 패널은 격자를 밀어내지 않는 xl 이상에서만 붙이고,
             * 그보다 좁으면 오버레이로 띄운다.
             */}
-          <div className="grid gap-2 md:grid-cols-2">
+          <div className={cn('grid gap-2 md:grid-cols-2', view === 'map' && 'hidden')}>
             {loading &&
               Array.from({ length: 8 }, (_, index) => (
                 <Skeleton key={index} className="h-24 w-full rounded-xl" />

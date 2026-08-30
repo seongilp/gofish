@@ -282,20 +282,29 @@ export function looksLikeMissingLow(range: Range): boolean {
   return range.min === 0.1 && range.max !== null && range.max > 15;
 }
 
-/** 지수에 대응하는 색. 5단계가 한눈에 갈려야 하므로 채도를 확실히 벌린다. */
-export function indexTone(index: string): { bg: string; text: string; dot: string } {
+/**
+ * 지수 5단계의 색. **단일 출처다.**
+ *
+ * 목록 배지, 분포 막대, 히트맵, 지도 원이 전부 여기서 색을 가져온다.
+ * 지도만 따로 hex 상수를 두면 어느 한쪽을 고쳤을 때 범례가 조용히 거짓말을 한다.
+ * 그래서 면(solid)으로 칠하는 곳은 전부 `hex` 를 inline style 로 쓰고,
+ * Tailwind 클래스는 반투명 배경 + 글자색인 배지에만 쓴다.
+ *
+ * hex 는 Tailwind 400 단계 값이다 (sky/emerald/amber/orange/red).
+ */
+export function indexTone(index: string): { bg: string; text: string; hex: string } {
   switch (index) {
     case '매우좋음':
-      return { bg: 'bg-sky-500/15', text: 'text-sky-300', dot: 'bg-sky-400' };
+      return { bg: 'bg-sky-500/15', text: 'text-sky-300', hex: '#38bdf8' };
     case '좋음':
-      return { bg: 'bg-emerald-500/15', text: 'text-emerald-300', dot: 'bg-emerald-400' };
+      return { bg: 'bg-emerald-500/15', text: 'text-emerald-300', hex: '#34d399' };
     case '보통':
-      return { bg: 'bg-amber-500/15', text: 'text-amber-300', dot: 'bg-amber-400' };
+      return { bg: 'bg-amber-500/15', text: 'text-amber-300', hex: '#fbbf24' };
     case '나쁨':
-      return { bg: 'bg-orange-500/15', text: 'text-orange-300', dot: 'bg-orange-400' };
+      return { bg: 'bg-orange-500/15', text: 'text-orange-300', hex: '#fb923c' };
     case '매우나쁨':
-      return { bg: 'bg-red-500/15', text: 'text-red-300', dot: 'bg-red-400' };
+      return { bg: 'bg-red-500/15', text: 'text-red-300', hex: '#f87171' };
     default:
-      return { bg: 'bg-muted', text: 'text-muted-foreground', dot: 'bg-muted-foreground' };
+      return { bg: 'bg-muted', text: 'text-muted-foreground', hex: '#6b7280' };
   }
 }
