@@ -156,6 +156,8 @@ export async function sendDailyPicks(
   date: string,
   label: string,
   siteUrl: string,
+  /** 자동 발화인지 수동 호출인지. 로그가 1시간 만에 사라져서 메시지에 남긴다. */
+  origin?: string,
 ): Promise<{ spots: number; messageId: string | null }> {
   const picks = rankForDate(spots, date);
   if (picks.length === 0) return { spots: 0, messageId: null };
@@ -163,7 +165,7 @@ export async function sendDailyPicks(
   const top = picks.slice(0, Math.min(TOP_N, MAX_EMBEDS));
 
   const messageId = await send({
-    content: `**${label} 바다낚시** · ${formatDate(date)}\n전국 ${picks.length}곳 — ${distributionLine(picks)}`,
+    content: `**${label} 바다낚시** · ${formatDate(date)}\n전국 ${picks.length}곳 — ${distributionLine(picks)}${origin ? ` · ${origin}` : ''}`,
     embeds: top.map((pick, i) => pickEmbed(pick, i + 1, siteUrl)),
   });
 
@@ -180,6 +182,8 @@ export async function sendWeekendOutlook(
   spots: Spot[],
   days: { date: string; label: string }[],
   siteUrl: string,
+  /** 자동 발화인지 수동 호출인지. 로그가 1시간 만에 사라져서 메시지에 남긴다. */
+  origin?: string,
 ): Promise<{ embeds: number; messageId: string | null }> {
   const embeds = [];
 
@@ -217,7 +221,7 @@ export async function sendWeekendOutlook(
   if (embeds.length === 0) return { embeds: 0, messageId: null };
 
   const messageId = await send({
-    content: '**주말 바다낚시 전망**',
+    content: `**주말 바다낚시 전망**${origin ? ` · ${origin}` : ''}`,
     embeds: embeds.slice(0, MAX_EMBEDS),
   });
 

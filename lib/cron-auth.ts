@@ -37,3 +37,39 @@ export function siteUrl(): string {
   const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
   return vercel ? `https://${vercel}` : 'https://gofish-kr.vercel.app';
 }
+
+/**
+ * 이 요청을 **누가** 발생시켰는지. 자동 발화 / 수동 호출을 구분한다.
+ *
+ * 왜 필요한가: Hobby 의 런타임 로그 보존은 1시간이라, 크론이 이른 아침(07:00)에 돌면
+ * 사람이 확인할 때쯤엔 로그가 이미 사라진다. 그러면 "정말 발화했는가"를 사후에
+ * 확인할 방법이 없다 — 수동 호출로는 자동 발화를 증명할 수 없기 때문이다.
+ *
+ * Vercel 은 크론이 부른 요청에만 `x-vercel-cron-schedule` 헤더(발화시킨 크론
+ * 표현식 그대로)와 `vercel-cron/1.0` User-Agent 를 붙인다. 이 값을 응답 본문과
+ * Discord 메시지에 함께 남기면, 로그가 만료된 뒤에도 **메시지 자체가 발화 기록**이
+ * 된다. 외부 저장소를 새로 붙이지 않아도 되고, 인스턴스별로 흩어지는 메모리와 달리
+ * 신뢰할 수 있다.
+ */
+export type CronTrigger = {
+  /** 크론이 부른 요청이면 true */
+  readonly automatic: boolean;
+  /** 발화시킨 크론 표현식. 수동 호출이면 null */
+  readonly schedule: string | null;
+};
+
+export function cronTrigger(request: Request): CronTrigger {
+  const schedule = request.headers.get('x-vercel-cron-schedule');
+  const isVercelCron = request.headers.get('user-agent')?.startsWith('vercel-cron/') ?? false;
+
+  return {
+    automatic: isVercelCron || schedule !== null,
+    schedule: schedule?.trim() || null,
+  };
+}
+
+/** Discord 메시지 등에 넣을 한 줄 표기. */
+export function describeTrigger(trigger: CronTrigger): string {
+  if (!trigger.automatic) return '수동 호출';
+  return trigger.schedule ? `자동 발화 (${trigger.schedule} UTC)` : '자동 발화';
+}

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { assertCron, siteUrl } from '@/lib/cron-auth';
+import { assertCron, cronTrigger, describeTrigger, siteUrl } from '@/lib/cron-auth';
 import { hasWebhook, sendDailyPicks } from '@/lib/discord';
 import { getForecastFresh } from '@/lib/fishing-cache';
 import { todayKst } from '@/lib/fishing';
@@ -22,6 +22,7 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.json({ ok: false, reason: 'DISCORD_WEBHOOK_URL 없음' }, { status: 503 });
   }
 
+  const trigger = cronTrigger(request);
   const wantTomorrow = new URL(request.url).searchParams.get('day') === 'tomorrow';
   // 발송 직전 강제 수집. 캐시된 예보로 알림을 보내면 하루 지난 지수가 나갈 수 있다.
   const forecast = await getForecastFresh();
@@ -42,8 +43,17 @@ export async function GET(request: Request): Promise<Response> {
     target,
     target === today ? '오늘' : '내일',
     siteUrl(),
+    describeTrigger(trigger),
   );
 
   // fetchedAt 을 응답에 실어 둔다. 강제 수집이 실제로 돌았는지 밖에서 확인할 방법이 이것뿐이다.
-  return NextResponse.json({ ok: true, date: target, fetchedAt: forecast.fetchedAt, ...result });
+  return NextResponse.json({
+    ok: true,
+    date: target,
+    fetchedAt: forecast.fetchedAt,
+    // 자동 발화 여부를 응답에도 실어 둔다. 수동으로 확인할 때 "지금 이건 수동이다" 를
+    // 응답만 보고 알 수 있게 하려는 목적이다.
+    trigger,
+    ...result,
+  });
 }
