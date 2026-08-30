@@ -21,9 +21,18 @@ export function assertCron(request: Request): Response | null {
   return null;
 }
 
-/** 절대 URL. Discord embed 의 링크는 상대경로로는 안 된다. */
+/**
+ * 절대 URL. Discord embed 의 링크는 상대경로로는 안 된다.
+ *
+ * `NEXT_PUBLIC_` 접두사를 쓰지 않는다. 이 값은 서버에서만 읽는데 접두사를 붙이면
+ * 클라이언트 번들에 박히고, Vercel 도 public 접두사 변수는 Production/Preview 에서
+ * sensitive 로 못 두게 막는다(실제로 거부당했다).
+ *
+ * 폴백인 `VERCEL_PROJECT_PRODUCTION_URL` 은 Vercel 이 자동 배정한 도메인
+ * (gofish-woad.vercel.app)이라 실제 별칭과 다르다. 그래서 SITE_URL 을 명시한다.
+ */
 export function siteUrl(): string {
-  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  const explicit = process.env.SITE_URL?.trim();
   if (explicit) return explicit.replace(/\/$/, '');
   const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
   return vercel ? `https://${vercel}` : 'https://gofish-kr.vercel.app';
