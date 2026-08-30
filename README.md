@@ -103,3 +103,8 @@ npm run dev
 ## 스택
 
 Next.js 16 (App Router) · TypeScript · Tailwind v4 · shadcn/ui · lucide-react · maplibre-gl v5 · Vercel
+
+## 배포
+
+Vercel `gofish` 프로젝트(`seongilp` 스코프)에 GitHub `seongilp/gofish` 가 연동돼 있다.
+`main` 에 푸시하면 프로덕션 배포가 자동으로 나가고 https://gofish-kr.vercel.app 에 반영된다.
