@@ -2,11 +2,13 @@
 
 import { AlertTriangle, Fish, Info, List, Map as MapIcon, RefreshCw } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { BottomSheet, SNAP_RATIO, type SheetSnap } from '@/components/bottom-sheet';
 import { SpotCard } from '@/components/spot-card';
 import { SpotDetail } from '@/components/spot-detail';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useIsCompact } from '@/lib/use-media-query';
 import {
   formatDate,
   INDEX_LABELS,
@@ -88,6 +90,24 @@ export function FishingBrowser() {
   const [view, setView] = useState<View>('list');
   /** 상세 히트맵에서 다른 슬롯을 눌렀을 때만 쓴다. 목록 슬롯과 독립적으로 움직인다. */
   const [detailSlotKey, setDetailSlotKey] = useState<string | null>(null);
+  /** 좁은 화면 + 지도 보기에서 상세를 담는 바텀시트의 높이 단계. */
+  const [sheetSnap, setSheetSnap] = useState<SheetSnap>('peek');
+
+  /*
+   * 상세를 우측 패널로 붙일지 시트/모달로 띄울지를 CSS 가 아니라 렌더로 가른다.
+   * `xl:hidden` 으로 숨기면 양쪽 SpotDetail 이 항상 같이 마운트된다.
+   */
+  const isCompact = useIsCompact();
+
+  /*
+   * 상세를 닫는 유일한 경로. 닫으면서 시트 높이도 peek 으로 되돌린다 —
+   * 다음에 다른 지점을 골랐을 때 항상 지도가 보이는 상태로 열려야 하기 때문이다.
+   * 닫는 갈래가 Esc·배경 탭·× 버튼·아래로 끌기 네 가지라 한 곳으로 모은다.
+   */
+  const closeDetail = useCallback(() => {
+    setSelectedId(null);
+    setSheetSnap('peek');
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -118,11 +138,11 @@ export function FishingBrowser() {
   // 상세를 Esc 로 닫는다. 모바일 시트는 배경 탭으로도 닫히지만 키보드 사용자에겐 출구가 없다.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSelectedId(null);
+      if (event.key === 'Escape') closeDetail();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [closeDetail]);
 
   const days = forecast?.days ?? [];
   const day = days[Math.min(dayIndex, Math.max(days.length - 1, 0))];
@@ -347,7 +367,9 @@ export function FishingBrowser() {
             * 지도가 스스로 필터링하면 두 화면이 어긋날 수 있어 순위 계산은 한 곳에만 둔다.
             */}
           {view === 'map' && (
-            <div className="border-border h-[calc(100dvh-19rem)] min-h-[380px] overflow-hidden rounded-xl border">
+            /* relative — 아래 바텀시트가 이 상자를 기준으로 자리를 잡는다.
+               positioned 조상이 없으면 absolute 가 뷰포트로 올라붙어 헤더까지 덮는다. */
+            <div className="border-border relative h-[calc(100dvh-19rem)] min-h-[380px] overflow-hidden rounded-xl border">
               {loading ? <Skeleton className="size-full" /> : (
                 <SpotMap
                   rows={ranked}
@@ -356,7 +378,31 @@ export function FishingBrowser() {
                     setSelectedId(spot.id);
                     setDetailSlotKey(null);
                   }}
+                  compact={isCompact}
+                  bottomInsetRatio={isCompact && selected ? SNAP_RATIO[sheetSnap] : 0}
                 />
+              )}
+
+              {/*
+                좁은 화면: 상세를 전체 화면 모달이 아니라 지도 상자 안의 바텀시트로 띄운다.
+                지도를 보면서 옆 지점으로 옮겨가는 게 지도 보기의 존재 이유인데, 예전처럼
+                `fixed inset-0` 으로 덮으면 지점 하나 볼 때마다 시트를 닫아야 했다.
+                손잡이를 끌거나 탭해 peek·half·full 로 높이를 바꾸고, peek 아래로 끌면 닫힌다.
+              */}
+              {isCompact && selected && detailSlot && (
+                <BottomSheet
+                  snap={sheetSnap}
+                  onSnapChange={setSheetSnap}
+                  onDismiss={closeDetail}
+                >
+                  <SpotDetail
+                    spot={selected}
+                    slot={detailSlot}
+                    today={today}
+                    onPickSlot={(slot) => setDetailSlotKey(`${slot.date}|${slot.noon}`)}
+                    onClose={closeDetail}
+                  />
+                </BottomSheet>
               )}
             </div>
           )}
@@ -396,27 +442,31 @@ export function FishingBrowser() {
           </div>
         </div>
 
-        {/* 데스크톱: 우측 고정 패널. 모바일: 아래 오버레이 시트. */}
-        {selected && detailSlot && (
-          <aside className="border-border bg-card/90 sticky top-44 hidden h-[calc(100dvh-12rem)] w-[22rem] shrink-0 self-start overflow-hidden rounded-xl border backdrop-blur xl:block">
+        {/* 데스크톱(≥1280px): 우측 고정 패널. 좁은 화면은 아래에서 시트/모달로 띄운다. */}
+        {selected && detailSlot && !isCompact && (
+          <aside className="border-border bg-card/90 sticky top-44 block h-[calc(100dvh-12rem)] w-[22rem] shrink-0 self-start overflow-hidden rounded-xl border backdrop-blur">
             <SpotDetail
               spot={selected}
               slot={detailSlot}
               today={today}
               onPickSlot={(slot) => setDetailSlotKey(`${slot.date}|${slot.noon}`)}
-              onClose={() => setSelectedId(null)}
+              onClose={closeDetail}
             />
           </aside>
         )}
       </div>
 
-      {selected && detailSlot && (
-        <div className="fixed inset-0 z-40 xl:hidden" role="dialog" aria-label={`${selected.name} 상세`}>
+      {/*
+        목록 보기의 좁은 화면 상세. 여기서는 가릴 지도가 없고 뒤에 있는 건 같은 목록이라
+        전체 화면 오버레이가 맞다. 지도 보기는 위 바텀시트가 맡는다.
+      */}
+      {selected && detailSlot && isCompact && view === 'list' && (
+        <div className="fixed inset-0 z-40" role="dialog" aria-label={`${selected.name} 상세`}>
           <button
             type="button"
             aria-label="닫기"
             className="absolute inset-0 bg-black/60"
-            onClick={() => setSelectedId(null)}
+            onClick={closeDetail}
           />
           <div className="bg-card border-border absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-hidden rounded-t-2xl border-t sm:inset-x-auto sm:top-1/2 sm:left-1/2 sm:h-[80dvh] sm:max-h-none sm:w-[26rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border">
             <SpotDetail
@@ -424,7 +474,7 @@ export function FishingBrowser() {
               slot={detailSlot}
               today={today}
               onPickSlot={(slot) => setDetailSlotKey(`${slot.date}|${slot.noon}`)}
-              onClose={() => setSelectedId(null)}
+              onClose={closeDetail}
             />
           </div>
         </div>

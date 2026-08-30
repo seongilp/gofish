@@ -165,3 +165,15 @@
   color: var(--muted-foreground);
 }
 .maplibregl-ctrl-attrib a { color: var(--muted-foreground); }
+
+/*
+  바텀시트가 열리면 저작권 배지와 줌 컨트롤을 그 위로 밀어 올린다.
+  maplibre 기본 컨트롤은 지도 DOM 안에 있어 React 로 위치를 못 준다. BottomSheet 가
+  자기 실제 높이를 부모(지도 상자)의 --sheet-h 로 흘려보내므로 드래그 중에도 따라온다.
+  OSM/CARTO 저작권 표시가 시트에 가려 사라지면 안 된다.
+*/
+.maplibregl-ctrl-bottom-left,
+.maplibregl-ctrl-bottom-right {
+  margin-bottom: var(--sheet-h, 0px);
+  transition: margin-bottom 0.3s ease-out;
+}

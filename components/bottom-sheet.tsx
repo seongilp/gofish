@@ -1,0 +1,241 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { cn } from '@/lib/utils';
+
+export type SheetSnap = 'peek' | 'half' | 'full';
+
+/**
+ * 스냅 지점. 부모(지도 영역) 높이에 대한 비율이다.
+ *
+ * 자매앱(seoul-vibe·korea-mountain)은 peek 을 0.28 로 두지만 gofish 는 0.34 다.
+ * 지도 상자가 `100dvh - 19rem` 라 브라우저 크롬을 포함한 실제 폰에서 380px 남짓까지
+ * 줄어드는데, 여기에 0.28 을 곱하면 106px 이라 상세 헤더(지점명 + 좌표, 약 64px)만
+ * 겨우 들어가고 "무엇을 보고 있는지" 외엔 아무 정보도 안 남는다. 0.34 면 헤더 아래로
+ * 7일 추이 히트맵의 날짜 줄까지 걸쳐 보인다.
+ *
+ * full 을 1.0 이 아니라 0.94 로 두는 건, 시트가 지도를 꽉 채우면 뒤에 지도가 있다는
+ * 사실 자체가 안 보여서 사용자가 닫는 법을 잃기 때문이다.
+ */
+export const SNAP_RATIO: Record<SheetSnap, number> = {
+  peek: 0.34,
+  half: 0.62,
+  full: 0.94,
+};
+
+const SNAP_ORDER: SheetSnap[] = ['peek', 'half', 'full'];
+
+/** 이 비율보다 아래로 끌어내리면 스냅이 아니라 닫기로 해석한다. */
+const DISMISS_RATIO = 0.16;
+
+/**
+ * 탭과 드래그를 가르는 기준.
+ *
+ * 손잡이 위에서 pointerdown 하면 부모 div 가 포인터를 캡처한다(드래그가 요소
+ * 밖으로 나가도 이벤트를 받아야 하므로 필수다). 그 결과 pointerup 타깃이 div 가
+ * 되고, click 은 down/up 타깃의 공통 조상에서 끝나 버튼의 onClick 이 영영 안 불린다.
+ * 그래서 탭 판정을 포인터 이벤트에서 직접 한다.
+ *
+ * 8px 는 브라우저·OS 가 쓰는 통상적인 터치 슬롭(Android 8dp, iOS 약 10px)에 맞춘
+ * 값이다. 이보다 작으면 손가락 떨림이 드래그로 잡히고, 크게 잡으면 짧은 드래그가
+ * 탭으로 오인돼 시트가 엉뚱한 단계로 튄다.
+ * 600ms 는 "누르고 있다가 마음이 바뀐" 경우를 탭으로 안 세기 위한 상한이다.
+ */
+const TAP_SLOP_PX = 8;
+const TAP_MAX_MS = 600;
+
+interface BottomSheetProps {
+  snap: SheetSnap;
+  onSnapChange: (snap: SheetSnap) => void;
+  /** 주면 peek 아래로 끌어내렸을 때 닫힌다. 없으면 peek 이 바닥이다. */
+  onDismiss?: () => void;
+  /** 손잡이 옆에 붙는 고정 영역. 여기도 드래그 핸들로 동작한다. */
+  header?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}
+
+/**
+ * 모바일 전용 드래그 바텀시트. 자매앱 seoul-vibe 의 같은 컴포넌트를 옮겨 왔다.
+ *
+ * 지도 위에 상세를 띄우되 "어디 얘기인지"를 잃지 않게 하는 게 목적이라,
+ * 전체 화면 모달이 아니라 높이를 조절할 수 있는 시트로 만든다. 상세를 열 때마다
+ * 지도가 통째로 사라지면 옆 지점으로 옮겨가려고 매번 시트를 닫아야 한다.
+ *
+ * 높이는 부모(position:relative 인 지도 영역) 기준 퍼센트로 준다. 뷰포트 기준
+ * dvh 를 쓰면 헤더 높이를 빼야 하고 iOS 주소창이 접힐 때마다 어긋난다.
+ */
+export function BottomSheet({
+  snap,
+  onSnapChange,
+  onDismiss,
+  header,
+  children,
+  className,
+}: BottomSheetProps) {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  /** 드래그 중에만 픽셀 높이를 직접 잡는다. null 이면 스냅 비율(퍼센트)을 쓴다. */
+  const [dragHeight, setDragHeight] = useState<number | null>(null);
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    startTime: number;
+    startHeight: number;
+    parentHeight: number;
+    /** pointerdown 이 손잡이 버튼 위에서 시작했나. 헤더를 끌 때는 탭으로 안 센다. */
+    fromHandle: boolean;
+    /** 슬롭을 넘겨 움직였나. 넘겼으면 탭이 아니라 드래그다. */
+    moved: boolean;
+  } | null>(null);
+
+  /*
+    maplibre 기본 컨트롤(저작권 배지 등)은 지도 DOM 안에 있어서 React 로 위치를
+    못 준다. 시트의 실제 높이를 부모의 CSS 변수로 흘려보내 CSS 쪽에서 밀어 올린다.
+    드래그 중 매 프레임 setState 하면 리렌더가 쏟아지므로 DOM 을 직접 만진다.
+  */
+  useEffect(() => {
+    const sheet = sheetRef.current;
+    const parent = sheet?.parentElement;
+    if (!sheet || !parent) return;
+
+    const observer = new ResizeObserver(() => {
+      parent.style.setProperty('--sheet-h', `${sheet.offsetHeight}px`);
+    });
+    observer.observe(sheet);
+
+    return () => {
+      observer.disconnect();
+      parent.style.removeProperty('--sheet-h');
+    };
+  }, []);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const sheet = sheetRef.current;
+    const parent = sheet?.parentElement;
+    if (!sheet || !parent) return;
+
+    dragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startTime: event.timeStamp,
+      startHeight: sheet.offsetHeight,
+      parentHeight: parent.clientHeight,
+      fromHandle: Boolean((event.target as HTMLElement | null)?.closest('[data-sheet-handle]')),
+      moved: false,
+    };
+    setDragHeight(sheet.offsetHeight);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    if (
+      Math.abs(event.clientY - drag.startY) > TAP_SLOP_PX ||
+      Math.abs(event.clientX - drag.startX) > TAP_SLOP_PX
+    ) {
+      drag.moved = true;
+    }
+
+    // 위로 끌면 커진다. 아래 한계는 0 까지 열어 둬야 '닫기' 제스처를 판정할 수 있다.
+    const next = drag.startHeight - (event.clientY - drag.startY);
+    const max = drag.parentHeight * SNAP_RATIO.full;
+    setDragHeight(Math.max(0, Math.min(next, max)));
+  }, []);
+
+  /** 손잡이를 탭(=드래그 없이 누르고 뗌)하면 다음 단계로 올린다. 큰 타깃이라 실수가 적다. */
+  const handleToggle = useCallback(() => {
+    const index = SNAP_ORDER.indexOf(snap);
+    onSnapChange(SNAP_ORDER[(index + 1) % SNAP_ORDER.length]);
+  }, [snap, onSnapChange]);
+
+  const handlePointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      dragRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+
+      // 손잡이 위에서 거의 안 움직이고 뗐으면 드래그가 아니라 탭이다.
+      // 높이를 되돌린 뒤 다음 단계로 올린다(스냅 근처라 아래 nearest 로직은 어차피 무동작).
+      if (drag.fromHandle && !drag.moved && event.timeStamp - drag.startTime < TAP_MAX_MS) {
+        setDragHeight(null);
+        handleToggle();
+        return;
+      }
+
+      const sheet = sheetRef.current;
+      const height = sheet?.offsetHeight ?? drag.startHeight;
+      const ratio = drag.parentHeight > 0 ? height / drag.parentHeight : SNAP_RATIO[snap];
+      setDragHeight(null);
+
+      if (onDismiss && ratio < DISMISS_RATIO) {
+        onDismiss();
+        return;
+      }
+
+      // 놓은 높이에서 가장 가까운 스냅으로 붙인다.
+      const nearest = SNAP_ORDER.reduce((best, candidate) =>
+        Math.abs(SNAP_RATIO[candidate] - ratio) < Math.abs(SNAP_RATIO[best] - ratio) ? candidate : best,
+      );
+      if (nearest !== snap) onSnapChange(nearest);
+    },
+    [handleToggle, onDismiss, onSnapChange, snap],
+  );
+
+  const dragging = dragHeight !== null;
+
+  return (
+    <div
+      ref={sheetRef}
+      className={cn(
+        'bg-card border-border absolute inset-x-0 bottom-0 z-20 flex flex-col rounded-t-2xl border-t shadow-[0_-8px_32px_rgba(0,0,0,0.45)]',
+        // 드래그 중에는 전환을 끊어야 손가락을 따라온다.
+        !dragging && 'transition-[height] duration-300 ease-out',
+        className,
+      )}
+      style={{ height: dragging ? `${dragHeight}px` : `${SNAP_RATIO[snap] * 100}%` }}
+    >
+      <div
+        // touch-action:none 이 없으면 브라우저가 제스처를 스크롤로 가로챈다.
+        className="shrink-0 cursor-grab touch-none active:cursor-grabbing"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+      >
+        {/* 손잡이 자체는 4px 이지만 위아래 여백까지 24px 를 확보해 잡기 쉽게 만든다. */}
+        {/*
+          포인터 탭은 handlePointerUp 이 처리한다. 아래 onClick 은 키보드
+          (Enter/Space)가 합성한 click 전용이다. 합성 click 은 detail 이 0 이라
+          실제 포인터 click 과 구분되므로 같은 탭이 두 번 처리될 일이 없다.
+        */}
+        <button
+          type="button"
+          data-sheet-handle
+          onClick={(event) => {
+            if (event.detail === 0) handleToggle();
+          }}
+          aria-label="시트 높이 조절"
+          className="flex h-6 w-full items-center justify-center"
+        >
+          <span className="bg-muted-foreground/40 h-1 w-10 rounded-full" />
+        </button>
+        {header}
+      </div>
+
+      {/*
+        스크롤은 자식이 직접 갖는다(SpotDetail 이 h-full flex-col 로 자기 본문에
+        overflow-y-auto 를 건다). 여기서 한 번 더 overflow-y-auto 를 걸면 이중
+        스크롤이 되고, 자식의 h-full 이 내용 높이 기준으로 풀려 시트 안에서 지점명
+        헤더가 같이 밀려 올라간다.
+        하단 safe-area(홈 인디케이터)만큼만 띄워 준다.
+      */}
+      <div className="min-h-0 flex-1 overscroll-contain pb-[env(safe-area-inset-bottom)]">
+        {children}
+      </div>
+    </div>
+  );
+}
