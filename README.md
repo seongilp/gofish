@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# gofish
 
-## Getting Started
+전국 49개 예보지점의 **바다낚시지수**를 7일치로 보는 앱. 오늘 어디가 좋은지는 랭킹으로,
+이번 주 흐름은 지점별 7일 추이로 본다.
 
-First, run the development server:
+https://gofish.vercel.app
+
+## 데이터
+
+해양수산부 국립해양조사원 **바다낚시지수 조회 서비스** (공공데이터포털 `15142486`) 하나만 쓴다.
+
+| 항목 | 실측값 |
+|---|---|
+| 예보지점 | 49곳 (전국 연안, 가거도~울릉도) |
+| 예보 범위 | 7일 |
+| 레코드 | 1,750건 (지점 × 날짜 × 시간대 × 어종) |
+| 지수 | 5단계 — 매우좋음 / 좋음 / 보통 / 나쁨 / 매우나쁨 |
+| 대상어종 | 감성돔·농어·돌돔·벵에돔·우럭·참돔·기타어종 |
+| 함께 오는 값 | 물때, 파고, 수온, 기온, 유속, 풍속 (전부 최저~최고 구간) |
+| 좌표 | 응답에 `lat` / `lot` 직접 포함 (경도 필드명이 `lon` 이 아니라 **`lot`**) |
+
+## 실호출로 확인한 함정
+
+이 API 를 쓸 사람을 위해 남긴다. 전부 직접 호출해서 확인한 것이다.
+
+1. **응답에 `response` 래퍼가 없다.** 대부분의 data.go.kr API 는 `{ response: { header, body } }`
+   인데 이 API 는 `{ header, body }` 가 최상위다. 다른 앱의 파서를 재사용하면 조용히 0건이 된다.
+2. **`numOfRows` 상한이 100이다.** 500·1000 을 넣으면 `INVALID_REQUEST_PARAMETER_ERROR`(10) 가
+   나는데 **어느 파라미터가 문제인지 알려주지 않는다.** 전수 수집에 18페이지가 필요하다.
+3. **`gubun`(갯바위/선상)은 필수인데 값이 무의미하다.** 빼면 `NO_MANDATORY_REQUEST_PARAMETERS_ERROR`(11)
+   가 나지만, 갯바위와 선상이 **완전히 같은 1,750건**을 준다(지점 49 공통, 전용 0). 한쪽만 부르면 된다.
+4. **`predcNoonSeCd` 값이 3종이다.** `오전`/`오후` 말고 **`일`** 이 있다.
+   **앞 3일만 오전·오후로 갈리고 뒤 4일은 종일(`일`) 하나뿐이다.**
+   오전/오후 토글을 7일 내내 켜 두면 뒤쪽 4일이 통째로 빈 화면이 된다.
+5. **어종이 `-` 인 지점이 15곳 있다.** `인천항 서측(24km)` 처럼 연안에서 떨어진 원해 예보 지점이다.
+   지수·해황 수치는 정상으로 오고 대상어종만 비어 있다.
+6. **최저 수온이 `0.1` 로 오는 레코드가 16건 있다** (원해 4개 지점). 최고값은 25℃ 안팎이라
+   결측을 채운 값으로 보인다. 이 앱은 값을 고치지 않고 `?` 표식만 단다.
+7. **serviceKey 를 재인코딩하면 안 된다.** Encoding 키에는 `%2F` 등이 이미 들어 있다.
+   `new URL()` + `searchParams.set()` 을 쓰면 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR` 가 난다.
+   그래서 쿼리스트링을 문자열로 직접 조립한다 (`lib/fishing-api.ts`).
+
+## 설계 메모
+
+- **전체를 통째로 받아 메모리에서 필터링한다.** 1,750건(18콜, 콜드 약 3~4초)뿐이라
+  필터 조합마다 업스트림을 치면 조합 수만큼 캐시가 갈라져 대부분의 요청이 콜드가 된다.
+  한 번 받아 두면 어떤 조합이든 즉시 응답하고 업스트림 호출은 TTL 당 18콜로 고정된다.
+- **route handler 는 `export const dynamic = 'force-dynamic'`.** `revalidate` 만 두면
+  빌드 타임에 외부 API 를 때리고 사용자의 새로고침도 막힌다. 신선도는 업스트림
+  `fetch(..., { next: { revalidate } })` 와 응답의 `Cache-Control` 로 잡는다.
+- **지도를 쓰지 않는다.** 49개 점은 지도를 채우기엔 적고, 이 데이터의 축은 공간이 아니라
+  **시간**(7일 × 오전/오후)이다. 대신 좌표로 나눈 해역(동해·서해·남해·제주) 필터를 둔다.
+  해역은 원본에 없는 파생값이라 화면에 그렇게 밝힌다.
+
+## 재현
 
 ```bash
+cp .env.example .env.local   # DATA_GO_KR_KEY 에 data.go.kr Encoding 키
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`15142486` 활용신청이 필요하다. 개발계정은 자동승인이라 신청 즉시 열린다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 스택
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Next.js 16 (App Router) · TypeScript · Tailwind v4 · shadcn/ui · lucide-react · Vercel
