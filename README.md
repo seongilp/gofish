@@ -108,3 +108,6 @@ Next.js 16 (App Router) · TypeScript · Tailwind v4 · shadcn/ui · lucide-reac
 
 Vercel `gofish` 프로젝트(`seongilp` 스코프)에 GitHub `seongilp/gofish` 가 연동돼 있다.
 `main` 에 푸시하면 프로덕션 배포가 자동으로 나가고 https://gofish-kr.vercel.app 에 반영된다.
+
+Preview 환경의 Branch Tracking 은 꺼 뒀다. `main` 외 브랜치를 푸시해도 자동 preview 배포가
+생기지 않는다 (Hobby 한도 보호). preview 가 필요하면 `vercel deploy` 로 직접 만들면 된다.
