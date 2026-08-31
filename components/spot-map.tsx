@@ -117,6 +117,26 @@ function buildSeaMarker(state: RegionSeaState): HTMLElement {
   el.style.userSelect = 'none';
   el.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.9))';
 
+  /*
+   * 공식 풍랑특보가 발효 중이면 그게 주다 — ⚠️ 배지를 물결 위에 올려 눈에 띄게 한다.
+   * 경보는 빨강, 주의보는 주황. 아래 '예보' 알약(파고·풍속)은 보조로 남는다.
+   */
+  const kind = state.warning.status;
+  if (kind === 'warning' || kind === 'advisory') {
+    const badge = document.createElement('span');
+    badge.textContent = kind === 'warning' ? '⚠️ 풍랑경보' : '⚠️ 풍랑주의보';
+    badge.style.marginBottom = '2px';
+    badge.style.padding = '1px 6px';
+    badge.style.borderRadius = '9999px';
+    badge.style.fontSize = '11px';
+    badge.style.fontWeight = '700';
+    badge.style.whiteSpace = 'nowrap';
+    badge.style.color = '#fff';
+    badge.style.background = kind === 'warning' ? 'rgba(220,38,38,0.92)' : 'rgba(217,119,6,0.92)';
+    badge.style.border = '1px solid rgba(255,255,255,0.5)';
+    el.appendChild(badge);
+  }
+
   const glyph = document.createElement('span');
   glyph.textContent = '🌊';
   glyph.style.fontSize = `${waveGlyphSize(state.waveMaxM)}px`;
@@ -138,8 +158,13 @@ function buildSeaMarker(state: RegionSeaState): HTMLElement {
   pill.style.border = '1px solid rgba(148,163,184,0.35)';
   el.appendChild(pill);
 
-  // 손대는 게 아니라 참고용임을 스크린리더에도 알린다.
-  el.setAttribute('aria-label', `${state.region} 예보 파고 ${wave}${wind ? `, 풍속${wind.replace(' · ', ' ')}` : ''} (공식 특보 아님)`);
+  // 특보(공식)와 예보값(참고)을 스크린리더에도 구분해 알린다.
+  const warnPrefix =
+    kind === 'warning' ? '풍랑경보 발효. ' : kind === 'advisory' ? '풍랑주의보 발효. ' : '';
+  el.setAttribute(
+    'aria-label',
+    `${state.region} ${warnPrefix}예보 파고 ${wave}${wind ? `, 풍속${wind.replace(' · ', ' ')}` : ''} (파고·풍속은 공식 특보 아님)`,
+  );
   return el;
 }
 

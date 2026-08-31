@@ -23,7 +23,7 @@ import {
   type Slot,
   type Spot,
 } from '@/lib/fishing';
-import { regionSeaStates } from '@/lib/sea-state';
+import { regionSeaStates, type SeaWarning } from '@/lib/sea-state';
 import { cn } from '@/lib/utils';
 
 interface Forecast {
@@ -82,6 +82,14 @@ export function FishingBrowser() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
+  /**
+   * 해역별 풍랑 특보(공식). 예보와 별도 경로(`/api/warnings`)로 받는다.
+   * `undefined` = 아직 못 받았거나 조회 실패 → 집계에서 전 해역 'unavailable'(확인 불가)로
+   * 남는다. **조회 실패를 '특보 없음' 으로 절대 떨어뜨리지 않는다.**
+   */
+  const [warnings, setWarnings] = useState<Partial<Record<Region, SeaWarning>> | undefined>(
+    undefined,
+  );
 
   const [dayIndex, setDayIndex] = useState(0);
   const [noon, setNoon] = useState<NoonCode>('오전');
@@ -133,7 +141,21 @@ export function FishingBrowser() {
       }
     };
 
+    // 특보는 예보와 독립으로 받는다 — 특보 조회가 실패해도 예보/화면은 살아 있어야 한다.
+    const loadWarnings = async () => {
+      try {
+        const response = await fetch('/api/warnings', { signal: controller.signal });
+        const body = await response.json();
+        if (controller.signal.aborted) return;
+        // 조회 실패(비-2xx)는 특보 없음이 아니다. warnings 를 비워 'unavailable' 로 남긴다.
+        setWarnings(response.ok ? (body.warnings as Partial<Record<Region, SeaWarning>>) : undefined);
+      } catch {
+        if (!controller.signal.aborted) setWarnings(undefined);
+      }
+    };
+
     void load();
+    void loadWarnings();
     return () => controller.abort();
   }, [reloadKey]);
 
@@ -191,8 +213,8 @@ export function FishingBrowser() {
    * 공식 특보(A)가 없으므로 warnings 인자는 넘기지 않는다 → 전부 'unavailable'.
    */
   const seaStates = useMemo(
-    () => (forecast ? regionSeaStates(forecast.spots, day?.date, effectiveNoon) : []),
-    [forecast, day, effectiveNoon],
+    () => (forecast ? regionSeaStates(forecast.spots, day?.date, effectiveNoon, warnings) : []),
+    [forecast, day, effectiveNoon, warnings],
   );
 
   const selected = forecast?.spots.find((spot) => spot.id === selectedId) ?? null;
