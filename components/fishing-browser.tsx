@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { BottomSheet, SNAP_RATIO, type SheetSnap } from '@/components/bottom-sheet';
+import { SeaStateBar } from '@/components/sea-state-bar';
 import { SpotCard } from '@/components/spot-card';
 import { SpotDetail } from '@/components/spot-detail';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -22,6 +23,7 @@ import {
   type Slot,
   type Spot,
 } from '@/lib/fishing';
+import { regionSeaStates } from '@/lib/sea-state';
 import { cn } from '@/lib/utils';
 
 interface Forecast {
@@ -181,6 +183,17 @@ export function FishingBrowser() {
 
     return rows.sort((a, b) => b.score - a.score || a.spot.name.localeCompare(b.spot.name, 'ko'));
   }, [forecast, day, effectiveNoon, region, fish]);
+
+  /*
+   * 해역별 바다상태(B 층). 해역 필터와 무관하게 **전체 지점**으로 집계한다 —
+   * 서/동/남/제주를 항상 함께 보여주는 게 이 스트립의 목적이라 `region` 을 타지 않는다.
+   * 어종 필터도 무관하다(파고·풍속은 어종과 독립). 날짜·시간대만 따라간다.
+   * 공식 특보(A)가 없으므로 warnings 인자는 넘기지 않는다 → 전부 'unavailable'.
+   */
+  const seaStates = useMemo(
+    () => (forecast ? regionSeaStates(forecast.spots, day?.date, effectiveNoon) : []),
+    [forecast, day, effectiveNoon],
+  );
 
   const selected = forecast?.spots.find((spot) => spot.id === selectedId) ?? null;
   const detailSlot =
@@ -347,6 +360,13 @@ export function FishingBrowser() {
           </div>
         </div>
       )}
+
+      {/*
+        해역별 바다상태 요약(B 층). 공식 풍랑특보가 아니라 낚시 예보 파고·풍속의 해역 집계다.
+        예보를 받은 뒤에만 그린다 — 조회 실패 시엔 위 error 배너가 대신 뜨고 여기엔 아무것도
+        안 나온다(실패를 "잔잔함" 이나 "특보 없음" 으로 보이게 하지 않는다).
+      */}
+      {!loading && !error && seaStates.length > 0 && <SeaStateBar states={seaStates} />}
 
       <div className="flex flex-1 gap-4">
         <div className="min-w-0 flex-1">
