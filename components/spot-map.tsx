@@ -4,6 +4,8 @@ import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
 
 import { INDEX_LABELS, indexTone, type Slot, type Spot } from '@/lib/fishing';
+import { SEA_ANCHORS, waveGlyphSize } from '@/lib/sea-anchors';
+import type { RegionSeaState } from '@/lib/sea-state';
 
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -84,14 +86,105 @@ function toGeoJson(rows: MapRow[]): GeoJSON.FeatureCollection {
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
+/**
+ * 이 줌 이상에서는 해역 아이콘을 숨긴다.
+ *
+ * 아이콘은 먼바다 한 점에 고정돼 있어 확대하면 화면 밖으로 밀려나 무의미해지고,
+ * 좁은 화면에서 특정 연안을 들여다볼 때 시야만 가린다. 해역 단위 표시는 전국이
+ * 한눈에 들어오는 줌아웃에서 의미가 있으므로 그때만 보인다.
+ */
+const SEA_ICON_MAX_ZOOM = 7.5;
+
+/**
+ * 해역 바다상태 HTML 마커 엘리먼트.
+ *
+ * 왜 심볼 레이어의 text-field 가 아니라 HTML 마커인가: maplibre 의 text-field 는 SDF
+ * 글리프라 CARTO 폰트 스택에 없는 이모지가 두부(□)로 깨지거나 안 그려진다(실측 함정).
+ * HTML 마커는 DOM 이라 브라우저 이모지 폰트로 확실히 렌더되고, 4개뿐이라 성능 부담이 없다.
+ *
+ * **공식 특보가 아님을 지도에서도 유지한다** — 지도만 보는 사용자에겐 상단 스트립 고지가
+ * 안 보이므로, 알약에 '예보' 꼬리표를 달고 경보 기호처럼 보이지 않는 담담한 물결로 둔다.
+ * 파고·풍속 수치를 함께 적어 그림만으로 규모를 오해하지 않게 한다.
+ */
+function buildSeaMarker(state: RegionSeaState): HTMLElement {
+  const el = document.createElement('div');
+  // 마커가 낚시터 마커 클릭을 가리지 않게 이벤트를 통과시킨다.
+  el.style.pointerEvents = 'none';
+  el.style.display = 'flex';
+  el.style.flexDirection = 'column';
+  el.style.alignItems = 'center';
+  el.style.lineHeight = '1';
+  el.style.userSelect = 'none';
+  el.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.9))';
+
+  const glyph = document.createElement('span');
+  glyph.textContent = '🌊';
+  glyph.style.fontSize = `${waveGlyphSize(state.waveMaxM)}px`;
+  el.appendChild(glyph);
+
+  const pill = document.createElement('span');
+  const wave = state.waveMaxM === null ? '—' : `${state.waveMaxM.toFixed(1)}m`;
+  const wind = state.windMaxMs === null ? '' : ` · ${state.windMaxMs.toFixed(0)}m/s`;
+  // '예보' 를 앞에 붙여 공식 특보가 아니라 예보값 참고임을 못박는다.
+  pill.textContent = `예보 ${wave}${wind}`;
+  pill.style.marginTop = '2px';
+  pill.style.padding = '1px 5px';
+  pill.style.borderRadius = '9999px';
+  pill.style.fontSize = '10px';
+  pill.style.fontWeight = '600';
+  pill.style.whiteSpace = 'nowrap';
+  pill.style.color = '#e5e7eb';
+  pill.style.background = 'rgba(11,15,25,0.72)';
+  pill.style.border = '1px solid rgba(148,163,184,0.35)';
+  el.appendChild(pill);
+
+  // 손대는 게 아니라 참고용임을 스크린리더에도 알린다.
+  el.setAttribute('aria-label', `${state.region} 예보 파고 ${wave}${wind ? `, 풍속${wind.replace(' · ', ' ')}` : ''} (공식 특보 아님)`);
+  return el;
+}
+
+/**
+ * 해역 아이콘 마커를 현재 상태로 갈아 끼운다.
+ *
+ * 날짜·시간대가 바뀌면 파고·풍속 수치가 바뀌므로 통째로 지우고 다시 만든다(4개뿐이라 싸다).
+ * 표본이 없는 해역(파고·풍속 둘 다 null)은 의미 없는 아이콘을 만들지 않는다 —
+ * 빈 바다에 `예보 —` 만 떠 있으면 오히려 오해를 부른다.
+ */
+function syncSeaMarkers(
+  map: MapLibreMap,
+  markersRef: { current: maplibregl.Marker[] },
+  states: RegionSeaState[],
+): void {
+  for (const marker of markersRef.current) marker.remove();
+  markersRef.current = [];
+
+  for (const state of states) {
+    if (state.waveMaxM === null && state.windMaxMs === null) continue;
+    const anchor = SEA_ANCHORS[state.region];
+    if (!anchor) continue;
+    const marker = new maplibregl.Marker({ element: buildSeaMarker(state), anchor: 'center' })
+      .setLngLat(anchor)
+      .addTo(map);
+    markersRef.current.push(marker);
+  }
+
+  const hidden = map.getZoom() > SEA_ICON_MAX_ZOOM;
+  for (const marker of markersRef.current) {
+    marker.getElement().style.visibility = hidden ? 'hidden' : 'visible';
+  }
+}
+
 export function SpotMap({
   rows,
+  seaStates = [],
   selectedId,
   onSelect,
   compact = false,
   bottomInsetRatio = 0,
 }: {
   rows: MapRow[];
+  /** 해역별 바다상태(파고·풍속 집계). 바다 위 아이콘으로 얹는다. 공식 특보가 아니다. */
+  seaStates?: RegionSeaState[];
   selectedId: string | null;
   onSelect: (spot: Spot) => void;
   /** 좁은 화면. 여백을 더 주고 지도 안 범례를 뺀다(위 분포 막대가 같은 역할을 한다). */
@@ -109,6 +202,10 @@ export function SpotMap({
   /* 지도 생성 effect 는 한 번만 돈다. 그 안에서 읽어야 하는 값은 ref 로 들고 있는다. */
   const compactRef = useRef(compact);
   const bottomInsetRef = useRef(bottomInsetRatio);
+  /* 해역 아이콘 HTML 마커. 줌 이벤트에서 숨김 처리하려면 인스턴스를 들고 있어야 한다. */
+  const seaMarkersRef = useRef<maplibregl.Marker[]>([]);
+  /* 지도 로드가 seaStates 도착보다 늦을 수 있어, load 핸들러가 최신 값을 읽게 ref 로 든다. */
+  const seaStatesRef = useRef(seaStates);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -125,6 +222,10 @@ export function SpotMap({
   useEffect(() => {
     bottomInsetRef.current = bottomInsetRatio;
   }, [bottomInsetRatio]);
+
+  useEffect(() => {
+    seaStatesRef.current = seaStates;
+  }, [seaStates]);
 
   /* 지도 생성 — 한 번만. */
   useEffect(() => {
@@ -210,6 +311,16 @@ export function SpotMap({
 
       loadedRef.current = true;
       map.getSource<maplibregl.GeoJSONSource>(SOURCE)?.setData(toGeoJson(rowsRef.current));
+      // 로드가 seaStates 도착보다 늦었을 수 있으니 여기서 한 번 그린다.
+      syncSeaMarkers(map, seaMarkersRef, seaStatesRef.current);
+    });
+
+    // 줌이 깊어지면 해역 아이콘을 숨긴다. 리스너는 지도 수명 동안 한 번만 건다.
+    map.on('zoom', () => {
+      const hidden = map.getZoom() > SEA_ICON_MAX_ZOOM;
+      for (const marker of seaMarkersRef.current) {
+        marker.getElement().style.visibility = hidden ? 'hidden' : 'visible';
+      }
     });
 
     map.on('click', 'spot-circle', (event) => {
@@ -255,6 +366,8 @@ export function SpotMap({
 
     return () => {
       observer.disconnect();
+      for (const marker of seaMarkersRef.current) marker.remove();
+      seaMarkersRef.current = [];
       map.remove();
       mapRef.current = null;
       loadedRef.current = false;
@@ -268,6 +381,13 @@ export function SpotMap({
     if (!map || !loadedRef.current) return;
     map.getSource<maplibregl.GeoJSONSource>(SOURCE)?.setData(rows.length ? toGeoJson(rows) : EMPTY);
   }, [rows]);
+
+  /* 해역 바다상태가 바뀌면(날짜·시간대) 아이콘을 갈아 끼운다. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+    syncSeaMarkers(map, seaMarkersRef, seaStates);
+  }, [seaStates]);
 
   /* 선택 강조. */
   useEffect(() => {
@@ -325,6 +445,18 @@ export function SpotMap({
         * 크기는 반드시 크기 유틸리티(size-full)로 직접 준다.
         */}
       <div ref={containerRef} className="size-full" />
+
+      {/*
+        해역 아이콘이 공식 특보로 오해되지 않게 하는 고지. **모든 화면 크기에서 보인다** —
+        지도만 보는 사용자에겐 상단 스트립의 "예보값 참고" 고지가 안 닿기 때문이다.
+        범례(아래)는 데스크톱에서만 뜨지만, 이 고지는 안전 문제라 compact 에서도 남긴다.
+      */}
+      {seaStates.some((s) => s.waveMaxM !== null || s.windMaxMs !== null) && (
+        <div className="bg-card/90 border-border text-muted-foreground pointer-events-none absolute top-2 left-2 rounded-lg border px-2 py-1 text-[10px] leading-snug backdrop-blur">
+          <div className="whitespace-nowrap">🌊 예보 파고·풍속 (해역 최대)</div>
+          <div className="text-foreground whitespace-nowrap">공식 특보 아님</div>
+        </div>
+      )}
 
       {/*
         범례. 색은 목록 배지와 같은 출처에서 온다.

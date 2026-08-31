@@ -393,6 +393,7 @@ export function FishingBrowser() {
               {loading ? <Skeleton className="size-full" /> : (
                 <SpotMap
                   rows={ranked}
+                  seaStates={seaStates}
                   selectedId={selectedId}
                   onSelect={(spot) => {
                     setSelectedId(spot.id);
