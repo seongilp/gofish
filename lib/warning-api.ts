@@ -22,6 +22,14 @@ import type { SeaWarning } from './sea-state';
  *
  *  4. `tmFc`(발표시각)는 KST 다(예: 202608311800 = 2026-08-31 18:00 KST, 실측).
  *
+ *  5. **serviceKey 는 이미 %-인코딩된 Encoding 키다(106자, `%2B`/`%2F` 포함).**
+ *     쿼리스트링에 **그대로(verbatim) 이어붙여야 한다.** `URL`/`URLSearchParams` 나
+ *     params 객체에 넣으면 이미 인코딩된 값을 한 번 더 인코딩해(`%2B`→`%252B`)
+ *     403 SERVICE_KEY_IS_NOT_REGISTERED 가 난다 — **미구독이 아니라 인코딩 문제인데
+ *     "승인이 안 됐나?" 하고 엉뚱한 데를 파게 된다**(다른 에이전트가 세 형태 동시각 실측:
+ *     원본=200, urldecode=403, 재인코딩=403). `lib/fishing-api.ts` 와 같은 패턴이라
+ *     여기서도 그대로 재사용한다.
+ *
  * **왜 풍랑만 거르나**: 사용자가 말한 "풍랑" 의 정확한 대응이고, 풍랑 구역만 해상예보구역이라
  * 4해역 매핑이 명확하다. 태풍·폭풍해일은 구역이 시군이라 해역 매핑이 모호해 "엉뚱한 해역에
  * 특보를 붙이는" 위험이 있고, 바다가 거칠 땐 풍랑 특보가 함께 발효되므로 풍랑으로 신호를
@@ -116,7 +124,11 @@ export interface WindWaveWarnings {
  */
 export async function fetchWindWaveWarnings(): Promise<WindWaveWarnings> {
   const key = serviceKey();
-  // Encoding 키(% 포함)는 그대로, Decoding 키만 한 번 인코딩한다.
+  /*
+   * 쿼리스트링을 문자열로 직접 조립한다(함정 5). Encoding 키(% 포함)는 그대로 두고,
+   * 혹시 Decoding 키가 들어오면 그때만 한 번 인코딩한다. URLSearchParams 로 넘기면
+   * 이미 인코딩된 키를 재인코딩해 403 이 난다 — 절대 쓰지 마라.
+   */
   const url =
     `${ENDPOINT}?serviceKey=${key.includes('%') ? key : encodeURIComponent(key)}` +
     `&pageNo=1&numOfRows=1&dataType=JSON&stnId=${STN_NATIONWIDE}`;
