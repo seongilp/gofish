@@ -237,7 +237,7 @@ export function FishingBrowser() {
         <div className="flex items-center gap-2">
           <Fish className="text-primary size-5 shrink-0" aria-hidden />
           <h1 className="text-base font-bold">
-            gofish <span className="text-muted-foreground font-normal">바다낚시지수</span>
+            낚시나우 <span className="text-muted-foreground font-normal">바다낚시지수</span>
           </h1>
           <div className="border-border bg-card/60 ml-auto flex items-center gap-0.5 rounded-full border p-0.5">
             <button
